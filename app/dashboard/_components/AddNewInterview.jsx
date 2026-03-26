@@ -1,129 +1,158 @@
-"use client"
-import React, { useState } from 'react'
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
-  } from "@/components/ui/dialog"
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { chatSession } from '@/utils/GeminiAIModal'
-import { LoaderCircle } from 'lucide-react'
-import { db } from '@/utils/db'
-import { MockInterview } from '@/utils/schema'
+"use client";
+import React, { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { db } from '@/utils/db';
+import { MockInterview } from '@/utils/schema';
 import { v4 as uuidv4 } from 'uuid';
-import { useUser } from '@clerk/nextjs'
-import moment from 'moment'
-import { useRouter } from 'next/navigation'
+import { useUser } from '@clerk/nextjs';
+import moment from 'moment';
+import { useRouter } from 'next/navigation';
 
 function AddNewInterview() {
-    const [openDailog,setOpenDailog]=useState(false)
-    const [jobPosition,setJobPosition]=useState();
-    const [jobDesc,setJobDesc]=useState();
-    const [jobExperience,setJobExperience]=useState();
-    const [loading,setLoading]=useState(false);
-    const [jsonResponse,setJsonResponse]=useState([]);
-    const router=useRouter();
-    const {user}=useUser();
-    const onSubmit=async(e)=>{
-        setLoading(true)
-        e.preventDefault()
-        console.log(jobPosition,jobDesc,jobExperience);
+  const [jobPosition, setJobPosition] = useState('');
+  const [jobDesc, setJobDesc] = useState('');
+  const [jobExperience, setJobExperience] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [jsonResponse, setJsonResponse] = useState([]);
 
-        const InputPrompt="Job position: "+jobPosition+", Job Description: "+jobDesc+", Years of Experience : "+jobExperience+" , Depends on Job Position, Job Description & Years of Experience give us "+process.env.NEXT_PUBLIC_INTERVIEW_QUESTION_COUNT+" Interview question along with Answer in JSON format, Give us question and answer field on JSON"
+  const router = useRouter();
+  const { user } = useUser();
 
-        const result=await chatSession.sendMessage(InputPrompt);
-        const MockJsonResp=(result.response.text()).replace('```json','').replace('```','')
-        console.log(JSON.parse(MockJsonResp));
-        setJsonResponse(MockJsonResp);
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
 
-        if(MockJsonResp)
-        {
-        const resp=await db.insert(MockInterview)
-        .values({
-            mockId:uuidv4(),
-            jsonMockResp:MockJsonResp,
-            jobPosition:jobPosition,
-            jobDesc:jobDesc,
-            jobExperience:jobExperience,
-            createdBy:user?.primaryEmailAddress?.emailAddress,
-            createdAt:moment().format('DD-MM-yyyy')
-        }).returning({mockId:MockInterview.mockId});
+    const InputPrompt = `
+Job position: ${jobPosition}
+Job Description: ${jobDesc}
+Years of Experience: ${jobExperience}
 
-        console.log("Inserted ID:",resp)
-        if(resp)
-        {
-            setOpenDailog(false);
-            router.push('/dashboard/interview/'+resp[0]?.mockId)
-        }
+Generate ${process.env.NEXT_PUBLIC_INTERVIEW_QUESTION_COUNT} interview questions.
+
+STRICT RULES:
+- Return ONLY JSON
+- No markdown
+- Format:
+[
+  {
+    "question": "string",
+    "answer": "string"
+  }
+]
+`;
+
+    try {
+      const response = await fetch("/api/gemini", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ prompt: InputPrompt }),
+      });
+
+      const data = await response.json();
+      const text = data.text;
+
+      const cleanText = text
+        .replace(/```json/g, "")
+        .replace(/```/g, "")
+        .trim();
+
+      const match = cleanText.match(/\[.*\]/s);
+      if (!match) throw new Error("Invalid JSON");
+
+      const parsed = JSON.parse(match[0]);
+      setJsonResponse(parsed);
+
+      const resp = await db.insert(MockInterview).values({
+        mockId: uuidv4(),
+        jsonMockResp: JSON.stringify(parsed),
+        jobPosition,
+        jobDesc,
+        jobExperience,
+        createdBy: user?.primaryEmailAddress?.emailAddress,
+        createdAt: moment().format('DD-MM-yyyy'),
+      }).returning({ mockId: MockInterview.mockId });
+
+      if (resp) {
+        router.push('/dashboard/interview/' + resp[0]?.mockId);
+      }
+
+    } catch (err) {
+      console.error(err);
+      alert("Failed to generate interview questions");
     }
-    else{
-        console.log("ERROR");
-    }
-        setLoading(false);
-    }
+
+    setLoading(false);
+  };
+
   return (
-    <div>
-        <div className='p-10 border rounded-lg bg-secondary
-        hover:scale-105 hover:shadow-md cursor-pointer
-         transition-all border-dashed'
-         onClick={()=>setOpenDailog(true)}
-         >
-            <h2 className='text-lg text-center'>+ Add New</h2>
-        </div>
-        <Dialog open={openDailog}>
-       
-        <DialogContent className="max-w-2xl">
-            <DialogHeader >
-            <DialogTitle className="text-2xl" >Tell us more about your job interviwing</DialogTitle>
-            <DialogDescription>
-                <form onSubmit={onSubmit}>
-                <div>
-                   
-                    <h2>Add Details about yout job position/role, Job description and years of experience</h2>
+    <form
+  onSubmit={onSubmit}
+  className="p-6 bg-white rounded-2xl shadow-lg border border-gray-100 max-w-xl mx-auto space-y-5"
+>
+  {/* Heading */}
+  <div>
+    <h2 className="text-2xl font-bold text-gray-800">
+      Create Mock Interview
+    </h2>
+    <p className="text-sm text-gray-500">
+      Fill in details to generate AI interview questions
+    </p>
+  </div>
 
-                    <div className='mt-7 my-3'>
-                        <label>Job Role/Job Position</label>
-                        <Input placeholder="Ex. Full Stack Developer" required
-                        onChange={(event)=>setJobPosition(event.target.value)}
-                        />
-                    </div>
-                    <div className=' my-3'>
-                        <label>Job Description/ Tech Stack (In Short)</label>
-                        <Textarea placeholder="Ex. React, Angular, NodeJs, MySql etc" 
-                        required
-                        onChange={(event)=>setJobDesc(event.target.value)} />
-                    </div>
-                    <div className=' my-3'>
-                        <label>Years of experience</label>
-                        <Input placeholder="Ex.5"  type="number"  max="100" 
-                        required
-                        onChange={(event)=>setJobExperience(event.target.value)}
-                        />
-                    </div>
-                </div>
-                <div className='flex gap-5 justify-end'>
-                    <Button type="button" variant="ghost" onClick={()=>setOpenDailog(false)}>Cancel</Button>
-                    <Button type="submit" disabled={loading} >
-                        {loading? 
-                        <>
-                        <LoaderCircle className='animate-spin' /> Generating from AI
-                        </>:'Start Interview'    
-                    }
-                        </Button>
-                </div>
-                </form>
-            </DialogDescription>
-            </DialogHeader>
-        </DialogContent>
-        </Dialog>
+  {/* Job Role */}
+  <div className="space-y-1">
+    <label className="text-sm font-medium text-gray-600">
+      Job Role
+    </label>
+    <Input
+      placeholder="e.g. Frontend Developer"
+      onChange={(e) => setJobPosition(e.target.value)}
+      required
+      className="rounded-xl focus:ring-2 focus:ring-indigo-400"
+    />
+  </div>
 
-    </div>
-  )
+  {/* Tech Stack */}
+  <div className="space-y-1">
+    <label className="text-sm font-medium text-gray-600">
+      Tech Stack
+    </label>
+    <Textarea
+      placeholder="React, Node.js, MongoDB..."
+      onChange={(e) => setJobDesc(e.target.value)}
+      required
+      className="rounded-xl focus:ring-2 focus:ring-indigo-400 resize-none"
+    />
+  </div>
+
+  {/* Experience */}
+  <div className="space-y-1">
+    <label className="text-sm font-medium text-gray-600">
+      Experience (Years)
+    </label>
+    <Input
+      type="number"
+      placeholder="e.g. 1"
+      onChange={(e) => setJobExperience(e.target.value)}
+      required
+      className="rounded-xl focus:ring-2 focus:ring-indigo-400"
+    />
+  </div>
+
+  {/* Button */}
+  <Button
+    disabled={loading}
+    className="w-full py-3 text-lg rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:opacity-90 transition"
+  >
+    {loading ? "Generating..." : "Start Interview"}
+  </Button>
+</form>
+
+  );
 }
 
-export default AddNewInterview
+export default AddNewInterview;
